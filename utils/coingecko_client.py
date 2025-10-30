@@ -2,22 +2,36 @@ import requests
 import time
 from datetime import datetime, timedelta
 import click
+from utils.local_cache import LocalCache
 
+# 核心封装类保持不变
 class CoinGeckoClient:
     BASE_URL = "https://api.coingecko.com/api/v3"
 
-    def __init__(self, retry=3, timeout=10):
+    def __init__(self, retry=3, timeout=10, cache_ttl=300):
         self.session = requests.Session()
         self.retry = retry
         self.timeout = timeout
+        self.cache = LocalCache(ttl=cache_ttl)
 
     def _get(self, endpoint, params=None):
         url = f"{self.BASE_URL}/{endpoint.lstrip('/')}"
+        # 创建缓存键
+        cache_key = (url, tuple(sorted((params or {}).items())))
+        
+        # 尝试从缓存获取
+        cached_result = self.cache.get(cache_key)
+        if cached_result is not None:
+            return cached_result
+            
         for i in range(self.retry):
             try:
                 resp = self.session.get(url, params=params, timeout=self.timeout)
                 if resp.status_code == 200:
-                    return resp.json()
+                    result = resp.json()
+                    # 将结果存入缓存
+                    self.cache.set(cache_key, result)
+                    return result
                 else:
                     click.secho(
                         f"[WARN] Request failed ({resp.status_code}): {resp.text}",
